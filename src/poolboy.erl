@@ -310,7 +310,7 @@ handle_checkin(Pid, State) ->
             true = ets:insert(Monitors, {Pid, CRef, MRef}),
             gen_server:reply(From, Pid),
             State#state{waiting = Left};
-        {empty, Empty} when Overflow > 0 and Dismiss==true ->
+        {empty, Empty} when Overflow > 0 ,Dismiss == true ->
             ok = dismiss_worker(Sup, Pid),
             State#state{waiting = Empty, overflow = Overflow - 1};
         {empty, Empty} when Overflow > 0 ->
