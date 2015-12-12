@@ -36,7 +36,8 @@
     size = 5 :: non_neg_integer(),
     overflow = 0 :: non_neg_integer(),
     max_overflow = 10 :: non_neg_integer(),
-    strategy = lifo :: lifo | fifo
+    strategy = lifo :: lifo | fifo,
+    overflow_dismiss = true
 }).
 
 -spec checkout(Pool :: pool()) -> pid().
@@ -139,6 +140,8 @@ init([{strategy, lifo} | Rest], WorkerArgs, State) ->
     init(Rest, WorkerArgs, State#state{strategy = lifo});
 init([{strategy, fifo} | Rest], WorkerArgs, State) ->
     init(Rest, WorkerArgs, State#state{strategy = fifo});
+init([{overflow_dismiss, false} | Rest], WorkerArgs, State) ->
+    init(Rest, WorkerArgs, State#state{overflow_dismiss = false});
 init([_ | Rest], WorkerArgs, State) ->
     init(Rest, WorkerArgs, State);
 init([], _WorkerArgs, #state{size = Size, supervisor = Sup} = State) ->
@@ -300,15 +303,22 @@ handle_checkin(Pid, State) ->
            waiting = Waiting,
            monitors = Monitors,
            overflow = Overflow,
-           strategy = Strategy} = State,
+           strategy = Strategy,
+           overflow_dismiss = Dismiss} = State,
     case queue:out(Waiting) of
         {{value, {From, CRef, MRef}}, Left} ->
             true = ets:insert(Monitors, {Pid, CRef, MRef}),
             gen_server:reply(From, Pid),
             State#state{waiting = Left};
-        {empty, Empty} when Overflow > 0 ->
+        {empty, Empty} when Overflow > 0 and Dismiss==true ->
             ok = dismiss_worker(Sup, Pid),
             State#state{waiting = Empty, overflow = Overflow - 1};
+        {empty, Empty} when Overflow > 0 ->
+            Workers = case Strategy of
+                lifo -> [Pid | State#state.workers];
+                fifo -> State#state.workers ++ [Pid]
+            end,
+            State#state{workers = Workers,waiting = Empty, overflow = Overflow - 1};
         {empty, Empty} ->
             Workers = case Strategy of
                 lifo -> [Pid | State#state.workers];
